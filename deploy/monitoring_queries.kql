@@ -1,0 +1,33 @@
+// Run in Application Insights -> Logs (workspace-based tables).
+
+// 1. End-to-end crew analysis duration & failures (custom span "crew.analysis")
+AppDependencies
+| where Name == "crew.analysis"
+| extend ticker = tostring(Properties["analysis.ticker"])
+| summarize runs = count(), failures = countif(Success == false),
+            p50_s = percentile(DurationMs, 50) / 1000, p95_s = percentile(DurationMs, 95) / 1000
+  by bin(TimeGenerated, 1h)
+| order by TimeGenerated desc
+
+// 2. API request volume, latency and errors
+AppRequests
+| summarize count(), avg(DurationMs), errors = countif(Success == false) by Name, bin(TimeGenerated, 15m)
+
+// 3. Outbound calls made by the agents (LLM provider, Yahoo, Firecrawl, Blob, Postgres)
+AppDependencies
+| where Name != "crew.analysis"
+| summarize calls = count(), avg_ms = avg(DurationMs), failures = countif(Success == false) by Target, Type
+| order by calls desc
+
+// 4. Application logs and exceptions from the quant.* loggers
+AppTraces
+| where SeverityLevel >= 2
+| project TimeGenerated, SeverityLevel, Message, Properties
+| order by TimeGenerated desc
+
+AppExceptions
+| project TimeGenerated, ProblemId, OuterMessage, Details
+| order by TimeGenerated desc
+
+// Example alert rule: failed analyses in the last 15 min > 0
+// AppDependencies | where Name == "crew.analysis" and Success == false | where TimeGenerated > ago(15m) | count
